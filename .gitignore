@@ -1,0 +1,10 @@
+/target/
+**/*.rs.bk
+Cargo.lock
+*.so
+*.elf
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+.env
