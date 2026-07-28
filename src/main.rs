@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use solana_program_fingerprint::{
-    cluster, compare_files, fingerprint_file, minhash::DEFAULT_NUM_HASHES,
-    opcode_ngram::DEFAULT_NGRAM_SIZE,
+    cluster, compare_files, fingerprint_db, fingerprint_file, lsh_index, similarity_report,
+    minhash::DEFAULT_NUM_HASHES, opcode_ngram::DEFAULT_NGRAM_SIZE,
 };
 
 #[derive(Parser)]
@@ -37,6 +37,25 @@ enum Commands {
         #[arg(long, default_value_t = 0.5)]
         threshold: f64,
     },
+    /// Build fingerprint catalog from a directory
+    Index {
+        dir: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Query catalog for similar programs
+    Query {
+        file: PathBuf,
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long, default_value_t = 0.6)]
+        min_jaccard: f64,
+    },
+    /// Detailed similarity report between two programs
+    Report {
+        file_a: PathBuf,
+        file_b: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -45,6 +64,13 @@ fn main() -> ExitCode {
         Commands::Compare { file_a, file_b } => cmd_compare(&file_a, &file_b),
         Commands::Fingerprint { file } => cmd_fingerprint(&file),
         Commands::Cluster { dir, threshold } => cmd_cluster(&dir, threshold),
+        Commands::Index { dir, output } => cmd_index(&dir, &output),
+        Commands::Query {
+            file,
+            db,
+            min_jaccard,
+        } => cmd_query(&file, &db, min_jaccard),
+        Commands::Report { file_a, file_b } => cmd_report(&file_a, &file_b),
     };
 
     match result {
@@ -102,5 +128,33 @@ fn cmd_cluster(dir: &PathBuf, threshold: f64) -> Result<(), String> {
         }
         println!();
     }
+    Ok(())
+}
+
+fn cmd_index(dir: &PathBuf, output: &PathBuf) -> Result<(), String> {
+    let db = fingerprint_db::FingerprintDb::scan_directory(dir, DEFAULT_NGRAM_SIZE, DEFAULT_NUM_HASHES)?;
+    db.save(output)?;
+    println!("indexed {} programs", db.len());
+    println!("catalog: {}", output.display());
+    Ok(())
+}
+
+fn cmd_query(file: &PathBuf, db_path: &PathBuf, min_jaccard: f64) -> Result<(), String> {
+    let db = fingerprint_db::FingerprintDb::load(db_path)?;
+    let fp = fingerprint_file(file)?;
+    let index = lsh_index::build_index_from_db(&db, 8)?;
+    let hits = index.query_with_scores(&fp.minhash, min_jaccard);
+
+    println!("query: {}", file.display());
+    println!("catalog: {} entries", db.len());
+    for (program_id, jaccard) in hits {
+        println!("  {} jaccard={:.4}", program_id, jaccard);
+    }
+    Ok(())
+}
+
+fn cmd_report(file_a: &PathBuf, file_b: &PathBuf) -> Result<(), String> {
+    let report = similarity_report::compare_paths(file_a, file_b)?;
+    println!("{}", similarity_report::format_report(&report));
     Ok(())
 }

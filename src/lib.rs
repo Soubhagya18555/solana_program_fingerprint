@@ -3,15 +3,20 @@
 //! Extracts normalized opcode n-grams from SBF ELF binaries and computes
 //! MinHash and SimHash fingerprints for similarity comparison and clustering.
 
+pub mod bytecode_normalize;
 pub mod cluster;
 pub mod elf_loader;
+pub mod fingerprint_db;
+pub mod lsh_index;
 pub mod minhash;
 pub mod opcode_ngram;
 pub mod simhash;
+pub mod similarity_report;
 
 use std::collections::HashSet;
 use std::path::Path;
 
+use bytecode_normalize::{NormalizeConfig, normalize_bytecode};
 use elf_loader::load_program;
 use minhash::{compute_signature, estimate_jaccard, MinHashSignature, DEFAULT_NUM_HASHES};
 use opcode_ngram::{extract_ngrams, DEFAULT_NGRAM_SIZE};
@@ -34,7 +39,16 @@ pub fn fingerprint_file(path: &Path) -> Result<ProgramFingerprint, String> {
 
 /// Build a full fingerprint from raw text section bytes.
 pub fn fingerprint_bytes(text: &[u8]) -> Result<ProgramFingerprint, String> {
-    let ngrams = extract_ngrams(text, DEFAULT_NGRAM_SIZE);
+    fingerprint_bytes_with_config(text, NormalizeConfig::default())
+}
+
+/// Build a fingerprint using a custom normalization policy.
+pub fn fingerprint_bytes_with_config(
+    text: &[u8],
+    config: NormalizeConfig,
+) -> Result<ProgramFingerprint, String> {
+    let normalized = normalize_bytecode(text, config);
+    let ngrams = extract_ngrams(&normalized.normalized, DEFAULT_NGRAM_SIZE);
     if ngrams.is_empty() {
         return Err("no opcode n-grams extracted from bytecode".into());
     }
